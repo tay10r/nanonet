@@ -25,7 +25,7 @@ TEST(Train, Xor)
     0x21'06'07'08 // mse_loss %6 %7 -> %8
   };
 
-  constexpr auto epochs{ 8 };
+  constexpr auto epochs{ 32 };
   constexpr auto steps_per_epoch{ 32 };
   constexpr auto learning_rate{ 0.01F };
 
@@ -37,7 +37,7 @@ TEST(Train, Xor)
     for (auto i = 0; i < steps_per_epoch; i++) {
       NanoNet_Reset(vm);
       ASSERT_EQ(NanoNet_SetRegData(vm, /*reg_index=*/0, 2, 2, w0), NANONET_OK);
-      ASSERT_EQ(NanoNet_SetRegData(vm, /*reg_index=*/4, 2, 1, w1), NANONET_OK);
+      ASSERT_EQ(NanoNet_SetRegData(vm, /*reg_index=*/4, 1, 2, w1), NANONET_OK);
       // forward pass (compute xor)
       const int in[2]{ in_dist(rng), in_dist(rng) };
       const float real_in[2]{ static_cast<float>(in[0]), static_cast<float>(in[1]) };
@@ -46,7 +46,7 @@ TEST(Train, Xor)
       // forward pass (compute loss)
       const int expected{ in[0] ^ in[1] };
       const float expected_real{ static_cast<float>(expected) };
-      ASSERT_EQ(NanoNet_SetRegData(vm, /*reg_index=*/5, 1, 1, real_in), NANONET_OK);
+      ASSERT_EQ(NanoNet_SetRegData(vm, /*reg_index=*/7, 1, 1, real_in), NANONET_OK);
       EXPECT_EQ(NanoNet_Forward(vm, &opcodes_loss, 1), NANONET_OK);
       const float loss = *NanoNet_GetRegData(vm, 8);
       train_loss_sum += loss;
@@ -58,7 +58,7 @@ TEST(Train, Xor)
       NanoNet_GradientDescent(vm, /*reg=*/4, learning_rate, w1);
     }
     const auto train_loss_avg = train_loss_sum / static_cast<float>(steps_per_epoch);
-    std::cout << "loss: " << train_loss_avg;
+    std::cout << "loss: " << train_loss_avg << std::endl;
   }
 
   NanoNet_Free(vm);

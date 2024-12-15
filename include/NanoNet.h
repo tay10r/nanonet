@@ -128,7 +128,7 @@ extern "C"
     uint16_t buffer_offset;
 
 #if NANONET_INFERENCE_ONLY == 0
-    uint8_t grad_buffer[NANONET_BUFFER_SIZE];
+    float grad_buffer[NANONET_BUFFER_SIZE];
 
     uint16_t grad_offset;
 #endif
@@ -191,21 +191,21 @@ extern "C"
                                                    const struct NanoNet_Reg* op2,
                                                    struct NanoNet_Reg* dst)
   {
-    float* result = NanoNet_AllocReg(self, dst, op1->rows, op2->cols);
-    if (!result) {
+    float* C = NanoNet_AllocReg(self, dst, op1->rows, op2->cols);
+    if (!C) {
       return NANONET_NO_MEMORY;
     }
 
-    memset(result, 0, ((uint16_t)dst->rows) * ((uint16_t)dst->cols));
+    memset(C, 0, ((size_t)dst->rows) * ((size_t)dst->cols) * sizeof(float));
 
-    const float* a = &self->buffer[op1->offset];
-    const float* b = &self->buffer[op2->offset];
+    const float* A = &self->buffer[op1->offset];
+    const float* B = &self->buffer[op2->offset];
 
     for (uint32_t j = 0; j < op1->rows; j++) {
       for (uint32_t k = 0; k < op2->cols; k++) {
-        const float tmp = b[k + j * op2->cols];
+        const float tmp = B[k + j * op2->cols];
         for (uint32_t i = 0; i < op1->rows; i++) {
-          result[i + j * op1->rows] += a[k * op1->cols + i] * tmp;
+          C[i + j * op1->rows] += A[k * op1->cols + i] * tmp;
         }
       }
     }
@@ -370,14 +370,117 @@ extern "C"
 #if NANONET_INFERENCE_ONLY == 0
 
   NANONET_FUNC enum NanoNet_Status NanoNet_Back_MatMul(struct NanoNet_VM* self,
-                                                       struct NanoNet_Reg* op1,
-                                                       struct NanoNet_Reg* op2,
-                                                       const struct NanoNet_Reg* src)
+                                                       const struct NanoNet_Reg* a,
+                                                       const struct NanoNet_Reg* b,
+                                                       const struct NanoNet_Reg* c)
   {
-    (void)self;
-    (void)op1;
-    (void)op2;
-    (void)src;
+    const uint32_t m = (uint32_t)a->rows;
+    const uint32_t n = (uint32_t)a->cols;
+    const uint32_t p = (uint32_t)b->cols;
+
+    /**
+     * Assume the forward pass is: C = A x B
+     *
+     * We're trying to solve for:
+     *
+     * dL / dA -> The change in loss with respect to A
+     * dL / dB -> The change in loss with respect to B
+     *
+     * And we know that:
+     *   dL / dA =       dL / dC x B^T
+     *   dL / dB = A^T x dL / dC
+     *
+     * Where:
+     *   A^T is the transpose of T
+     *   dL / dC is the change in loss with respect to C, which should have been computed already
+     */
+
+    const float* A = &self->buffer[a->offset];
+    const float* B = &self->buffer[b->offset];
+    const float* dC = &self->grad_buffer[c->offset];
+    float* dA = &self->grad_buffer[a->offset];
+    float* dB = &self->grad_buffer[b->offset];
+
+    for (uint32_t i = 0; i < m * n; i++) {
+      dA[i] = 0.0f;
+    }
+
+    for (uint32_t i = 0; i < n * p; i++) {
+      dB[i] = 0.0f;
+    }
+
+    /* Compute dA = dC * B ^ T */
+    for (uint32_t i = 0; i < m; i++) {
+      for (uint32_t j = 0; j < n; j++) {
+        for (uint32_t k = 0; k < p; k++) {
+          dA[i * n + j] += dC[i * p + k] * B[j * p + k];
+        }
+      }
+    }
+
+    /* Compute dB = A ^ T * dC */
+    for (uint32_t i = 0; i < n; i++) {
+      for (uint32_t j = 0; j < p; j++) {
+        for (uint32_t k = 0; k < m; k++) {
+          dB[i * p + j] += A[k * n + i] * dC[k * p + j];
+        }
+      }
+    }
+
+    return NANONET_OK;
+  }
+
+  NANONET_FUNC enum NanoNet_Status NanoNet_Back_ReLU(struct NanoNet_VM* self,
+                                                     const struct NanoNet_Reg* a,
+                                                     const struct NanoNet_Reg* c)
+  {
+    const uint16_t size = ((uint16_t)a->rows) * ((uint16_t)a->cols);
+
+    const float* A = &self->buffer[a->offset];
+    const float* dC = &self->grad_buffer[c->offset];
+    float* dA = &self->grad_buffer[a->offset];
+
+    for (uint16_t i = 0; i < size; i++) {
+      dA[i] = (A[i] > 0.0f) ? dC[i] : 0.0f;
+    }
+
+    return NANONET_OK;
+  }
+
+  NANONET_FUNC enum NanoNet_Status NanoNet_Back_MSE(struct NanoNet_VM* self,
+                                                    const struct NanoNet_Reg* a,
+                                                    const struct NanoNet_Reg* b,
+                                                    const struct NanoNet_Reg* c)
+  {
+    /**
+     * This function computes the change in loss with respect to the predicted matrix.
+     *
+     * dMSE / dY
+     *
+     * Which is equal to 2 / n (Y - Y_0)
+     *
+     * Where Y_0 is the ground truth.
+     *
+     * In the code, per convention, A is the first operand and is equal to the predicted matrix.
+     * B is the second operand and equal to the ground truth matrix.
+     */
+
+    const uint16_t size = ((uint16_t)a->rows) * ((uint16_t)a->cols);
+
+    const float inv = 1.0F / ((float)size);
+    const float* A = &self->buffer[a->offset];
+    const float* B = &self->buffer[b->offset];
+    float* dA = &self->grad_buffer[a->offset];
+
+    /**
+     * Note: The predictions should always be the first operand and the ground truth is the second operand.
+     *       No gradient is computed for the ground truth.
+     */
+
+    for (uint16_t i = 0; i < size; i++) {
+      dA[i] = inv * (A[i] - B[i]);
+    }
+
     return NANONET_OK;
   }
 
@@ -389,16 +492,16 @@ extern "C"
 
     for (uint32_t i = num_opcodes; i > 0; i--) {
 
-      const uint8_t op = (opcodes[i - 1] >> 24) && 0xff;
+      const auto opcode = opcodes[i - 1];
+      const uint8_t op = (opcode >> 24) & 0xff;
 
-      struct NanoNet_Reg* op1 = &self->regs[(opcodes[i] >> 16) & 0xff];
-      struct NanoNet_Reg* op2 = &self->regs[(opcodes[i] >> 8) & 0xff];
-
-      const struct NanoNet_Reg* dst = &self->regs[opcodes[i] & 0xff];
+      const struct NanoNet_Reg* a = &self->regs[(opcode >> 16) & 0xff];
+      const struct NanoNet_Reg* b = &self->regs[(opcode >> 8) & 0xff];
+      const struct NanoNet_Reg* c = &self->regs[opcode & 0xff];
 
       switch ((enum NanoNet_Op)op) {
         case NANONET_OP_MATMUL:
-          status = NanoNet_Back_MatMul(self, op1, op2, dst);
+          status = NanoNet_Back_MatMul(self, a, b, c);
           break;
         case NANONET_OP_ADD:
           break;
@@ -409,10 +512,12 @@ extern "C"
         case NANONET_OP_COLCAT:
           break;
         case NANONET_OP_MSE:
+          status = NanoNet_Back_MSE(self, a, b, c);
           break;
         case NANONET_OP_SIGMOID:
           break;
         case NANONET_OP_RELU:
+          status = NanoNet_Back_ReLU(self, a, c);
           break;
         case NANONET_OP_TANH:
           break;
@@ -438,7 +543,9 @@ extern "C"
     const uint16_t size = ((uint16_t)r->rows) * ((uint16_t)r->cols);
 
     for (uint16_t i = 0; i < size; i++) {
-      weights[i] = self->buffer[r->offset + i] + self->grad_buffer[r->offset + i] * learning_rate;
+      const float g = self->grad_buffer[r->offset + i];
+      const float x = self->buffer[r->offset + i];
+      weights[i] = x + g * learning_rate;
     }
   }
 

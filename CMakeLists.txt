@@ -8,8 +8,11 @@ option(NANONET_EXAMPLES "Whether to build the example programs." OFF)
 option(NANONET_WARNINGS "Whether to build with compiler warnings." OFF)
 
 add_library(NanoNet INTERFACE)
+target_sources(NanoNet INTERFACE include/NanoNet.h)
 target_include_directories(NanoNet INTERFACE include)
-target_link_libraries(NanoNet INTERFACE m)
+if(UNIX)
+  target_link_libraries(NanoNet INTERFACE m)
+endif()
 add_library(NanoNet::HeaderOnly ALIAS NanoNet)
 
 if(NANONET_COMPILED)
