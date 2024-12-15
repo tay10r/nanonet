@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.14.7)
+
+project(NanoNet)
+
+option(NANONET_COMPILED "Whether to build the compiled version of the library." ON)
+option(NANONET_TESTS    "Whether to build the unit tests." OFF)
+option(NANONET_EXAMPLES "Whether to build the example programs." OFF)
+option(NANONET_WARNINGS "Whether to build with compiler warnings." OFF)
+
+add_library(NanoNet INTERFACE)
+target_include_directories(NanoNet INTERFACE include)
+target_link_libraries(NanoNet INTERFACE m)
+add_library(NanoNet::HeaderOnly ALIAS NanoNet)
+
+if(NANONET_COMPILED)
+  add_library(NanoNetC src/NanoNet.c)
+  target_include_directories(NanoNetC PUBLIC include)
+  target_link_libraries(NanoNetC PUBLIC NanoNet::HeaderOnly)
+  add_library(NanoNet::Compiled ALIAS NanoNetC)
+  if(NANONET_WARNINGS)
+    if(CMAKE_COMPILER_IS_GNUCC)
+      target_compile_options(NanoNetC PRIVATE -Wall -Wextra -Werror -Wfatal-errors -fanalyzer)
+    endif()
+  endif()
+endif()
+
+if(NANONET_EXAMPLES)
+  add_executable(NanoNet_Example example.c)
+  target_link_libraries(NanoNet_Example PUBLIC NanoNet::Compiled)
+  set_target_properties(NanoNet_Example PROPERTIES OUTPUT_NAME example)
+endif()
+
+if(NANONET_TESTS)
+  add_subdirectory(tests)
+endif()
