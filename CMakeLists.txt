@@ -48,6 +48,7 @@ endif()
 
 if(NANONET_TESTS)
   add_subdirectory(tests)
+  enable_testing()
 endif()
 
 if(NANONET_DOCS)

@@ -18,3 +18,8 @@ set_target_properties(NanoNet_Tests
   PROPERTIES
     OUTPUT_NAME run_tests
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+
+add_test(NAME NanoNet_UnitTests
+  COMMAND $<TARGET_FILE:NanoNet_Tests>)
+
+enable_testing()
