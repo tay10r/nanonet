@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.14.7)
 
-project(NanoNet)
+project(NanoNet
+  DESCRIPTION "A C99 library for executing and training neural networks."
+  VERSION 1.0)
 
 option(NANONET_COMPILED "Whether to build the compiled version of the library." ON)
 option(NANONET_TESTS    "Whether to build the unit tests." OFF)
 option(NANONET_EXAMPLES "Whether to build the example programs." OFF)
 option(NANONET_WARNINGS "Whether to build with compiler warnings." OFF)
+option(NANONET_DOCS     "Whether to build the documentation." OFF)
 
 add_library(NanoNet INTERFACE)
 target_sources(NanoNet INTERFACE include/NanoNet.h)
@@ -28,11 +31,31 @@ if(NANONET_COMPILED)
 endif()
 
 if(NANONET_EXAMPLES)
-  add_executable(NanoNet_Example example.c)
-  target_link_libraries(NanoNet_Example PUBLIC NanoNet::Compiled)
-  set_target_properties(NanoNet_Example PROPERTIES OUTPUT_NAME example)
+
+  function(add_example name)
+    set(target NanoNet_Example_${name})
+    add_executable(${target} ${ARGN})
+    target_link_libraries(${target} PUBLIC NanoNet::Compiled)
+    set_target_properties(${target}
+      PROPERTIES
+        OUTPUT_NAME ${name})
+  endfunction()
+
+  add_example(custom_allocator examples/custom_allocator.c)
+  add_example(status_string examples/status.c)
+
 endif()
 
 if(NANONET_TESTS)
   add_subdirectory(tests)
+endif()
+
+if(NANONET_DOCS)
+  find_package(Doxygen REQUIRED)
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/Doxyfile"
+    @ONLY)
+  add_custom_target(NanoNet_Docs ALL
+    "${DOXYGEN_EXECUTABLE}"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

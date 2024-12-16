@@ -1,10 +1,35 @@
+/**
+ * @file NanoNet.h
+ *
+ * @brief The header file containing the API declarations and (optionally) the implementation of the library.
+ * */
+
 #pragma once
 
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+ * @brief This is the major version number of the library.
+ *
+ * @details If this version number changes, that means there was a change made to the library that is not backwards
+ *          compatible on a compilation level. For example, the major version number may change when an existing
+ *          function changes the type of one of its arguments.
+ * */
 #define NANONET_VERSION_MAJOR 1
+
+/**
+ * @brief this is the minor version number of the library.
+ *
+ * @details If this version number changes, that means a feature was added to the library. A change in this version
+ *          number does not break backwards compatibility.
+ * */
 #define NANONET_VERSION_MINOR 0
+
+/**
+ * @brief This is the combined major and minor version numbers of the library. The major version has the most
+ *        significant bits.
+ * */
 #define NANONET_VERSION ((NANONET_VERSION_MAJOR << 8) | NANONET_VERSION)
 
 #ifdef NANONET_STATIC
@@ -12,14 +37,19 @@
 #endif
 
 #ifndef NANONET_FUNC
+/**
+ * @brief This macro can be defined in order to add attributes to each of the public functions in the library.
+ *        By default, it does nothing.
+ * */
 #define NANONET_FUNC
 #endif
 
 #ifndef NANONET_INFERENCE_ONLY
 /**
  * @brief This can be defined as 1 in order to disable all functions and
- * variables used for training the network. This can speed up compilation
- * and keep the code a bit more lean without link-time optimization.
+ *        variables used for training the network. This can reduce the amount
+ *        of memory needed to use the library, since a buffer would not be needed
+ *        for computing gradients.
  * */
 #define NANONET_INFERENCE_ONLY 0
 #endif
@@ -29,44 +59,172 @@ extern "C"
 {
 #endif
 
+  /**
+   * @brief This enumeration is used to indicate the success or failure of a function call in this library.
+   * */
   enum NanoNet_Status
   {
+    /**
+     * @brief Indicates that the function call was successful.
+     * */
     NANONET_OK,
+    /**
+     * @brief Indicates that a function call failed because there was not enough memory to complete it.
+     * */
     NANONET_NO_MEMORY,
+    /**
+     * @brief Indicates that a function call failed due to an incorrect number of rows or columns in a matrix.
+     * */
     NANONET_SHAPE_ERROR,
+    /**
+     * @brief Indicates that a function call failed due to an malformed opcode.
+     * */
     NANONET_BAD_OPCODE
   };
 
+  /**
+   * @brief Converts a status code into a human-readable error message.
+   *
+   * @param s The status code to convert to a message.
+   *
+   * @return A null-terminated string that describes the status code.
+   * */
   NANONET_FUNC const char* NanoNet_StatusString(enum NanoNet_Status s);
 
-  NANONET_FUNC struct NanoNet_VM;
+  /**
+   * @brief This is the opaque structure that represents the virtual machine.
+   *
+   * @details The virtual machine takes a series of opcodes and executes them in order
+   *          to complete the forward and backward passes of the network. Internally
+   *          it has one or two floating point buffers and a set of registers used for
+   *          executing the opcodes.
+   * */
+  struct NanoNet_VM;
 
+  /**
+   * @brief Indicates the number of bytes in the VM.
+   *
+   * @details This can be used if you would like to avoid using malloc and free, which are the functions used by the
+   *          library in order to allocate the memory for a VM. If you do not want to use those functions, you can use
+   *          this function to find out how many bytes your custom memory allocation method needs to store the VM in
+   *          memory. Once you have got a pointer to a buffer with this many bytes, you can just memset it to zero in
+   *          order to initialize the VM.
+   * */
   NANONET_FUNC size_t NanoNet_VMSize(void);
 
+  /**
+   * @brief Allocates a new virtual machine for executing the IR modules for this library.
+   *
+   * @return A pointer to the VM, if the memory allocation was successful. Otherwise, a null pointer is returned.
+   * */
   NANONET_FUNC struct NanoNet_VM* NanoNet_New(void);
 
+  /**
+   * @brief Releases the memory allocated by the VM.
+   *
+   * @param self A pointer to the VM to release the memory of.
+   * */
   NANONET_FUNC void NanoNet_Free(struct NanoNet_VM* self);
 
+  /**
+   * @brief Executes the forward pass of an IR module.
+   *
+   * @param self A pointer to the VM to execute the module with.
+   *
+   * @param opcodes A pointer to the array of opcodes associated with the module.
+   *
+   * @param num_opcodes The number of opcodes in the module.
+   *
+   * @return A status code to indicate whether this forward pass was successful.
+   *
+   * @note Be sure to call @ref NanoNet_Reset when you want to call this function again, unless you are continuing the
+   *       forward pass with additional opcodes (such as the opcodes for computing loss).
+   * */
   NANONET_FUNC enum NanoNet_Status NanoNet_Forward(struct NanoNet_VM* self,
                                                    const uint32_t* opcodes,
                                                    uint32_t num_opcodes);
 
 #if NANONET_INFERENCE_ONLY == 0
+  /**
+   * @brief Runs the backwards pass of an IR module.
+   *
+   * @details What this function does is execute the opcodes in reverse, computing the gradients along the way.
+   *          This means that before calling this function, the forward pass must have first been called. The gradients
+   *          can then be used to update the weights by calling @ref NanoNet_GradientDescent.
+   *
+   * @param self The VM that executed the forward pass.
+   *
+   * @param opcodes The opcodes of the forward pass. These get executed in reverse.
+   *
+   * @param num_opcodes The number of opcodes in the IR module.
+   *
+   * @return A status code to indicate whether or not the backwards pass was successful.
+   * */
   NANONET_FUNC enum NanoNet_Status NanoNet_Backward(struct NanoNet_VM* self,
                                                     const uint32_t* opcodes,
                                                     uint32_t num_opcodes);
 
+  /**
+   * @brief Subtracts a fraction of the gradient from the matrix at the given register and places the result
+   *        in @p weights.
+   *
+   * @param self The VM containing the gradient register.
+   *
+   * @param reg The index of the register to apply gradient descent on.
+   *
+   * @param learning_rate The fraction of the gradient to subtract from the original matrix.
+   *
+   * @param weights A pointer to place the result data into. This must be equal to the size of the matrix at the given
+   *                register.
+   * */
   NANONET_FUNC void NanoNet_GradientDescent(struct NanoNet_VM* self, uint8_t reg, float learning_rate, float* weights);
 #endif
 
+  /**
+   * @brief Resets the internal memory allocator, making room for a new call to @ref NanoNet_Forward.
+   *
+   * @details When executing a forward and backward pass, an internal memory buffer is used to make room for the
+   *          intermediate results and the outputs. If you want to call the forward and backward passes again, you will
+   *          need to restore the space to that buffer so that it can be used again. This function clears that buffer so
+   *          that it can be used again.
+   * */
   NANONET_FUNC void NanoNet_Reset(struct NanoNet_VM* self);
 
+  /**
+   * @brief Sets the data at a given register in the VM.
+   *
+   * @details Before running a forward pass, you will probably need to set the input matrices for the network. To do
+   *          that, you need to call this function and set the shape and coefficients of the matrix.
+   *
+   * @param self The VM being used to execute an IR module.
+   *
+   * @param reg_index The index of the register to set the data of.
+   *
+   * @param rows The number of rows to set this register to.
+   *
+   * @param cols The number of columns to set this register to.
+   *
+   * @param data A pointer to the matrix coefficients.
+   *
+   * @return A status code to indicate whether or not the register was set successfully.
+   * */
   NANONET_FUNC enum NanoNet_Status NanoNet_SetRegData(struct NanoNet_VM* self,
                                                       uint8_t reg_index,
                                                       uint8_t rows,
                                                       uint8_t cols,
                                                       const float* data);
 
+  /**
+   * @brief Gets a pointer to the data at a given register.
+   *
+   * @details After running a forward pass with an IR module, you may want to grab the results in order to do something
+   *          with them. Calling this function will get you a pointer to any one of the computed values so that you can
+   *          do something with it.
+   *
+   * @param self The VM that executed the forward pass.
+   *
+   * @param reg_index The index of the register to get the data from.
+   * */
   NANONET_FUNC const float* NanoNet_GetRegData(const struct NanoNet_VM* self, uint8_t reg_index);
 
 #ifdef __cplusplus
@@ -82,6 +240,8 @@ extern "C"
 #ifndef NANONET_REGS
 #define NANONET_REGS 256
 #endif
+
+#define NANONET_UNUSED(var) ((void)var)
 
 #include <math.h>
 #include <stdlib.h>
@@ -452,6 +612,8 @@ extern "C"
                                                     const struct NanoNet_Reg* b,
                                                     const struct NanoNet_Reg* c)
   {
+    NANONET_UNUSED(c);
+
     /**
      * This function computes the change in loss with respect to the predicted matrix.
      *
@@ -492,7 +654,7 @@ extern "C"
 
     for (uint32_t i = num_opcodes; i > 0; i--) {
 
-      const auto opcode = opcodes[i - 1];
+      const uint32_t opcode = opcodes[i - 1];
       const uint8_t op = (opcode >> 24) & 0xff;
 
       const struct NanoNet_Reg* a = &self->regs[(opcode >> 16) & 0xff];
