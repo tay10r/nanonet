@@ -43,6 +43,7 @@ if(NANONET_EXAMPLES)
 
   add_example(custom_allocator examples/custom_allocator.c)
   add_example(status_string examples/status.c)
+  add_example(inference examples/inference.c)
 
 endif()
 

@@ -5,7 +5,8 @@ find_package(GTest CONFIG REQUIRED)
 
 add_executable(NanoNet_Tests
   ops.cpp
-  train.cpp)
+  train.cpp
+  module.cpp)
 
 target_link_libraries(NanoNet_Tests
   PUBLIC

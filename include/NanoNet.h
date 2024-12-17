@@ -79,7 +79,11 @@ extern "C"
     /**
      * @brief Indicates that a function call failed due to an malformed opcode.
      * */
-    NANONET_BAD_OPCODE
+    NANONET_BAD_OPCODE,
+    /**
+     * @brief An integer overflow occurred at some point during a function call.
+     * */
+    NANONET_INT_OVERFLOW
   };
 
   /**
@@ -227,6 +231,253 @@ extern "C"
    * */
   NANONET_FUNC const float* NanoNet_GetRegData(const struct NanoNet_VM* self, uint8_t reg_index);
 
+#if NANONET_INFERENCE_ONLY == 0
+
+  /**
+   * @note This is used internally to build a module. Do not use it outside of the implementation of this library.
+   * */
+  struct NanoNet_Interpreter
+  {
+    /** @brief Internal use only */
+    uint8_t (*input)(void* interp_data, const char* file, int line, uint8_t rows, uint8_t cols);
+
+    /** @brief Internal use only */
+    uint8_t (*param)(void* interp_data, const char* file, int line, uint8_t rows, uint8_t cols);
+
+    /** @brief Internal use only */
+    uint8_t (*matmul)(void* interp_data, const char* file, int line, uint8_t a, uint8_t b);
+
+    /** @brief Internal use only */
+    uint8_t (*add)(void* interp_data, const char* file, int line, uint8_t a, uint8_t b);
+
+    /** @brief Internal use only */
+    uint8_t (*mul)(void* interp_data, const char* file, int line, uint8_t a, uint8_t b);
+
+    /** @brief Internal use only */
+    uint8_t (*relu)(void* interp_data, const char* file, int line, uint8_t x);
+
+    /** @brief Internal use only */
+    uint8_t (*sigmoid)(void* interp_data, const char* file, int line, uint8_t x);
+
+    /** @brief Internal use only */
+    uint8_t (*mse)(void* interp_data, const char* file, int line, uint8_t predicted, uint8_t target);
+  };
+
+  /**
+   * @brief The type of the function used to define a module.
+   *
+   * @param interp_data A pointer to the interpreter data.
+   *
+   * @param interp A pointer to the interpreter functions.
+   *
+   * @note This is used internally to build a module. Do not use it outside of the implementation of this library.
+   * */
+  typedef uint8_t (*NanoNet_ModuleFunc)(void* interp_data, const struct NanoNet_Interpreter* interp);
+
+  /**
+   * @brief This is the type of the function used to receive error messages about the module being built.
+   *
+   * @param callback_data Optional data for the caller to use.
+   *
+   * @param description A description of the error, which is null terminated.
+   *
+   * @param description_len The number of characters in the description, not including the null terminator.
+   * */
+  typedef void (*NanoNet_BuildErrorCallback)(void* callback_data, const char* description, size_t description_len);
+
+  /**
+   * @brief Use this macro in order to define a module.
+   *
+   * @details This macro begins a function which is used to describe the graph of a neural network. You must follow this
+   *          macro with the body of the module or a semicolon (if you're only defining the function prototype).
+   *
+   * @param name The name of the module.
+   * */
+#define NANONET_DEF_MODULE(name) uint8_t name(void* interp_data, const struct NanoNet_Interpreter* interp)
+
+  /**
+   * @brief this macro defines an input value.
+   *
+   * @param rows The number of rows in the input value.
+   *
+   * @param cols The number of columns in the input value.
+   * */
+#define NANONET_INPUT(rows, cols) interp->input(interp_data, __FILE__, __LINE__, (rows), (cols))
+
+  /**
+   * @brief This macro defines a trainable parameter.
+   *
+   * @param rows The number of rows in the parameter.
+   *
+   * @param cols The number of columns in the parameter.
+   *
+   * @return The register index for the parameter.
+   * */
+#define NANONET_PARAM(rows, cols) interp->param(interp_data, __FILE__, __LINE__, (rows), (cols))
+
+  /**
+   * @brief This macro defines a matrix multiplication.
+   *
+   * @param a The left hand matrix of the expression.
+   *
+   * @param b The right hand matrix of the expression.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_MATMUL(a, b) interp->matmul(interp_data, __FILE__, __LINE__, (a), (b))
+
+  /**
+   * @brief This macro defines a matrix addition.
+   *
+   * @param a The left hand matrix of the expression.
+   *
+   * @param b The right hand matrix of the expression.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_ADD(a, b) interp->add(interp_data, __FILE__, __LINE__, (a), (b))
+
+  /**
+   * @brief This macro defines coefficient-wise multiplication of two matrices.
+   *
+   * @param a The left hand matrix of the expression.
+   *
+   * @param b The right hand matrix of the expression.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_MUL(a, b) interp->mul(interp_data, __FILE__, __LINE__, (a), (b))
+
+  /**
+   * @brief This macro defines the rectified linear unit activation function.
+   *
+   * @param x The input to the activation function.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_RELU(x) interp->relu(interp_data, __FILE__, __LINE__, (x))
+
+  /**
+   * @brief This macro defines the sigmoid activation function.
+   *
+   * @param x The input to the activation function.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_SIGMOID(x) interp->sigmoid(interp_data, __FILE__, __LINE__, (x))
+
+  /**
+   * @brief This macro defines a mean-squared error loss function.
+   *
+   * @param predicted The predicted value matrix.
+   *
+   * @param target The target value matrix.
+   *
+   * @return The register index of the result.
+   * */
+#define NANONET_MSE(predicted, target) interp->mse(interp_data, __FILE__, __LINE__, (predicted), (target))
+
+  struct NanoNet_Module;
+
+  /**
+   * @brief Builds the module that is described by @p module_def.
+   *
+   * @param m The variable to assign the module pointer.
+   *
+   * @param module_def The function that describes the module. Use @ref NANONET_DEF_MODULE to define this function.
+   *
+   * @param error_callback_data Optionally set this parameter to the data you want passed to the error callback.
+   *
+   * @param error_callback Optionally set this to the function you would like called when an error is encountered in
+   *                       the module definition.
+   *
+   * @return A status code to indicate whether or not the module was built successfully.
+   * */
+  NANONET_FUNC enum NanoNet_Status NanoNet_BuildModule(struct NanoNet_Module** m,
+                                                       NanoNet_ModuleFunc module_def,
+                                                       void* error_callback_data,
+                                                       NanoNet_BuildErrorCallback error_callback);
+
+  /**
+   * @brief Releases the memory associated with a module.
+   *
+   * @param m A pointer to the module to release the memory of.
+   * */
+  NANONET_FUNC void NanoNet_FreeModule(struct NanoNet_Module* m);
+
+  /**
+   * @brief Randomizes the weights of the module.
+   *
+   * @param m The module to randomize the weights of.
+   *
+   * @param seed The seed used to initialize the random number generator.
+   * */
+  NANONET_FUNC void NanoNet_RandomizeWeights(struct NanoNet_Module* m, uint32_t seed);
+
+  /**
+   * @brief Gets the opcode data associated with the module.
+   *
+   * @param m The module to get the opcode data of.
+   *
+   * @param num_opcodes Optionally set this in order to get the number of opcodes in the module.
+   *
+   * @return A pointer to the opcodes of the module.
+   * */
+  NANONET_FUNC const uint32_t* NanoNet_GetModuleCode(const struct NanoNet_Module* m, uint32_t* num_opcodes);
+
+  /**
+   * @brief Gets the output register index of a module.
+   *
+   * @param m The module to get the output register index of.
+   *
+   * @return The index of the output register for this module.
+   * */
+  NANONET_FUNC uint8_t NanoNet_GetOutputRegister(const struct NanoNet_Module* m);
+
+  /**
+   * @brief Gets the number of parameters in the module.
+   *
+   * @param m The module to get the parameter count of.
+   *
+   * @return The number of parameters in the module.
+   *
+   * @note This is refering to the number of matrices which can be tuned with automatic differentation, not the number
+   *       of scalars in the parameter buffer.
+   * */
+  NANONET_FUNC uint32_t NanoNet_GetNumParams(const struct NanoNet_Module* m);
+
+  /**
+   * @brief Gets a parameter from the module.
+   *
+   * @param m The module to get the parameter from.
+   *
+   * @param param_index The index of the parameter to get.
+   *
+   * @param reg_index Optionally set this pointer to get the register index that the parameter should be assigned to.
+   *
+   * @param rows Optionally set this pointer to get the number of rows in the parameter.
+   *
+   * @param cols Optionally set this pointer to get the number of columns in the parameter.
+   *
+   * @return A pointer to the parameter buffer.
+   * */
+  NANONET_FUNC float* NanoNet_GetParam(struct NanoNet_Module* m,
+                                       uint8_t param_index,
+                                       uint8_t* reg_index,
+                                       uint8_t* rows,
+                                       uint8_t* cols);
+
+  /**
+   * @brief This is an LCG random number generator.
+   *
+   * @param x The state of the LCG.
+   *
+   * @return The output state of the LCG.
+   * */
+  NANONET_FUNC uint32_t NanoNet_LCG(uint32_t x);
+
+#endif
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
@@ -244,6 +495,8 @@ extern "C"
 #define NANONET_UNUSED(var) ((void)var)
 
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -310,6 +563,8 @@ extern "C"
         return "Shape Error";
       case NANONET_BAD_OPCODE:
         return "Bad Opcode";
+      case NANONET_INT_OVERFLOW:
+        return "Integer Overflow";
     }
     return "Unknown Status Code";
   }
@@ -739,6 +994,491 @@ extern "C"
   NANONET_FUNC const float* NanoNet_GetRegData(const struct NanoNet_VM* self, const uint8_t reg_index)
   {
     return &self->buffer[self->regs[reg_index].offset];
+  }
+
+  struct NanoNet_Module
+  {
+    uint8_t output_register;
+
+    uint32_t num_opcodes;
+
+    uint32_t num_params;
+
+    float* params;
+
+    struct NanoNet_Reg* param_regs;
+
+    uint8_t* param_reg_indices;
+
+    uint8_t* input_reg_indices;
+
+    uint32_t* opcodes;
+  };
+
+  struct NanoNet_Builder
+  {
+    uint32_t num_opcodes;
+
+    uint8_t num_params;
+
+    uint32_t param_buffer_size;
+
+    uint32_t buffer_size;
+
+    uint8_t num_inputs;
+
+    uint8_t next_reg_index;
+
+    struct NanoNet_Reg* regs;
+
+    void* error_callback_data;
+
+    NanoNet_BuildErrorCallback error_callback;
+
+    enum NanoNet_Status status;
+
+    struct NanoNet_Module* mod;
+  };
+
+#define NANONET_ERROR_REG 255
+
+#define NANONET_INTERNAL_BUILDER_ERROR(builder, what)                                                                  \
+  do {                                                                                                                 \
+    if ((builder)->error_callback) {                                                                                   \
+      (builder)->error_callback((builder)->error_callback_data, what, sizeof(what) - 1);                               \
+    }                                                                                                                  \
+  } while (0)
+
+  static inline uint32_t NanoNet_MatSize(const uint8_t rows, const uint8_t cols)
+  {
+    return ((uint32_t)rows) * ((uint32_t)cols);
+  }
+
+  static inline void NanoNet_BuildError(struct NanoNet_Builder* builder, const char* fmt, ...)
+  {
+    if (!builder->error_callback) {
+      return;
+    }
+
+    va_list args;
+    va_start(args, fmt);
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+
+    const int size = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
+
+    if (size < 0) {
+      NANONET_INTERNAL_BUILDER_ERROR(builder, "An error occurred but failed to create the description.");
+      return;
+    }
+
+    char* buffer = (char*)malloc((size + 1) * sizeof(char));
+    if (!buffer) {
+      NANONET_INTERNAL_BUILDER_ERROR(builder, "An error occurred but failed to allocate the description.");
+      return;
+    }
+
+    vsnprintf(buffer, size + 1, fmt, args_copy);
+
+    va_end(args_copy);
+
+    builder->error_callback(builder->error_callback_data, buffer, size);
+
+    free(buffer);
+  }
+
+  /******************************************
+   * Section: Register/Input/Param Counting *
+   ******************************************/
+
+  static inline uint8_t NanoNet_AllocRegIndex(struct NanoNet_Builder* builder, const char* file, int line)
+  {
+    const uint8_t r = builder->next_reg_index;
+    if (r == NANONET_ERROR_REG) {
+      NanoNet_BuildError(builder, "%s: %d: Failed to allocate register.", file, line);
+      return NANONET_ERROR_REG;
+    }
+    builder->next_reg_index++;
+    return r;
+  }
+
+  static inline uint8_t NanoNet_CountInput(void* builder_ptr,
+                                           const char* file,
+                                           const int line,
+                                           const uint8_t rows,
+                                           const uint8_t cols)
+  {
+    NANONET_UNUSED(rows);
+    NANONET_UNUSED(cols);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    builder->num_inputs++;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountParam(void* builder_ptr,
+                                           const char* file,
+                                           const int line,
+                                           const uint8_t rows,
+                                           const uint8_t cols)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+
+    builder->num_params++;
+
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+
+    const uint32_t size = NanoNet_MatSize(rows, cols);
+
+    if ((0xffffffffUL - builder->param_buffer_size) < size) {
+      builder->status = NANONET_INT_OVERFLOW;
+      NanoNet_BuildError(builder, "%s: %d: Parameter buffer exceeds the 32-bit limit.", file, line);
+      return out_reg;
+    }
+
+    builder->param_buffer_size += size;
+
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountMatMul(void* builder_ptr,
+                                            const char* file,
+                                            const int line,
+                                            const uint8_t a,
+                                            const uint8_t b)
+  {
+    NANONET_UNUSED(a);
+    NANONET_UNUSED(b);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountAdd(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t a,
+                                         const uint8_t b)
+  {
+    NANONET_UNUSED(a);
+    NANONET_UNUSED(b);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountMul(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t a,
+                                         const uint8_t b)
+  {
+    NANONET_UNUSED(a);
+    NANONET_UNUSED(b);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountReLU(void* builder_ptr, const char* file, const int line, uint8_t x)
+  {
+    NANONET_UNUSED(x);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountSigmoid(void* builder_ptr, const char* file, const int line, uint8_t x)
+  {
+    NANONET_UNUSED(x);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_CountMSE(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t predicted,
+                                         const uint8_t target)
+  {
+    NANONET_UNUSED(predicted);
+    NANONET_UNUSED(target);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  /***************************************
+   * Section: Opcode / Register Writing  *
+   ***************************************/
+
+  static inline uint8_t NanoNet_BuildInput(void* builder_ptr,
+                                           const char* file,
+                                           const int line,
+                                           const uint8_t rows,
+                                           const uint8_t cols)
+  {
+    NANONET_UNUSED(rows);
+    NANONET_UNUSED(cols);
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->input_reg_indices[builder->num_inputs] = out_reg;
+    builder->num_inputs++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildParam(void* builder_ptr,
+                                           const char* file,
+                                           const int line,
+                                           const uint8_t rows,
+                                           const uint8_t cols)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    const uint32_t size = NanoNet_MatSize(rows, cols);
+
+    struct NanoNet_Reg* reg = &builder->mod->param_regs[builder->num_params];
+    reg->rows = rows;
+    reg->cols = cols;
+    reg->offset = builder->param_buffer_size;
+
+    builder->mod->param_reg_indices[builder->num_params] = out_reg;
+    builder->num_params++;
+    builder->param_buffer_size += size;
+
+    return out_reg;
+  }
+
+  static inline uint32_t NanoNet_Encode(enum NanoNet_Op op, uint8_t a, uint8_t b, uint8_t out)
+  {
+    uint32_t result = 0;
+    result |= (((uint32_t)op) << 24);
+    result |= (((uint32_t)a) << 16);
+    result |= (((uint32_t)b) << 8);
+    result |= ((uint32_t)out);
+    return result;
+  }
+
+  static inline uint8_t NanoNet_BuildMatMul(void* builder_ptr,
+                                            const char* file,
+                                            const int line,
+                                            const uint8_t a,
+                                            const uint8_t b)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_MATMUL, a, b, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildAdd(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t a,
+                                         const uint8_t b)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_ADD, a, b, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildMul(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t a,
+                                         const uint8_t b)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_MUL, a, b, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildReLU(void* builder_ptr, const char* file, const int line, uint8_t x)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_RELU, x, 0, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildSigmoid(void* builder_ptr, const char* file, const int line, uint8_t x)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_SIGMOID, x, 0, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  static inline uint8_t NanoNet_BuildMSE(void* builder_ptr,
+                                         const char* file,
+                                         const int line,
+                                         const uint8_t predicted,
+                                         const uint8_t target)
+  {
+    struct NanoNet_Builder* builder = (struct NanoNet_Builder*)builder_ptr;
+    const uint8_t out_reg = NanoNet_AllocRegIndex(builder, file, line);
+    builder->mod->opcodes[builder->num_opcodes] = NanoNet_Encode(NANONET_OP_MSE, predicted, target, out_reg);
+    builder->num_opcodes++;
+    return out_reg;
+  }
+
+  NANONET_FUNC enum NanoNet_Status NanoNet_BuildModule(struct NanoNet_Module** m_ptr,
+                                                       NanoNet_ModuleFunc module_def,
+                                                       void* error_callback_data,
+                                                       NanoNet_BuildErrorCallback error_callback)
+  {
+    struct NanoNet_Builder builder;
+
+    memset(&builder, 0, sizeof(builder));
+    builder.error_callback_data = error_callback_data;
+    builder.error_callback = error_callback;
+
+    static const struct NanoNet_Interpreter count_ops = { NanoNet_CountInput,   NanoNet_CountParam, NanoNet_CountMatMul,
+                                                          NanoNet_CountAdd,     NanoNet_CountMul,   NanoNet_CountReLU,
+                                                          NanoNet_CountSigmoid, NanoNet_CountMSE };
+
+    module_def(&builder, &count_ops);
+
+    size_t memory_size = 0;
+    memory_size += sizeof(struct NanoNet_Module);
+    memory_size += builder.param_buffer_size * sizeof(float);
+    memory_size += builder.num_params * sizeof(struct NanoNet_Reg);
+    memory_size += builder.num_params * sizeof(uint8_t);
+    memory_size += builder.num_inputs * sizeof(uint8_t);
+    memory_size += builder.num_opcodes * sizeof(uint32_t);
+
+    char* memory = (char*)malloc(memory_size);
+    if (!memory) {
+      NANONET_INTERNAL_BUILDER_ERROR(&builder, "Ran out of memory.");
+      return NANONET_NO_MEMORY;
+    }
+
+    memset(memory, 0, memory_size);
+
+    struct NanoNet_Module* m = (struct NanoNet_Module*)memory;
+    memory += sizeof(struct NanoNet_Module);
+
+    /* parameter buffer */
+    m->params = (float*)memory;
+    memory += builder.param_buffer_size * sizeof(float);
+
+    /* parameter registers */
+    m->param_regs = (struct NanoNet_Reg*)memory;
+    m->num_params = builder.num_params;
+    memory += builder.num_params * sizeof(struct NanoNet_Reg);
+
+    /* parameter register indices */
+    m->param_reg_indices = (uint8_t*)memory;
+    memory += builder.num_params * sizeof(uint8_t);
+
+    /* input register indices */
+    m->input_reg_indices = (uint8_t*)memory;
+    memory += builder.num_inputs * sizeof(uint8_t);
+
+    /* opcodes */
+    m->opcodes = (uint32_t*)memory;
+    m->num_opcodes = builder.num_opcodes;
+    memory += builder.num_opcodes * sizeof(uint32_t);
+
+    /* TODO : might be better to just have the output registers declared */
+    m->output_register = (builder.next_reg_index > 0) ? (builder.next_reg_index - 1) : 0;
+
+    *m_ptr = m;
+
+    static const struct NanoNet_Interpreter build_ops = { NanoNet_BuildInput,   NanoNet_BuildParam, NanoNet_BuildMatMul,
+                                                          NanoNet_BuildAdd,     NanoNet_BuildMul,   NanoNet_BuildReLU,
+                                                          NanoNet_BuildSigmoid, NanoNet_BuildMSE };
+
+    // These are reset because we use them as indices/offsets for the second pass.
+    builder.mod = m;
+    builder.param_buffer_size = 0;
+    builder.num_params = 0;
+    builder.num_inputs = 0;
+    builder.num_opcodes = 0;
+    builder.next_reg_index = 0;
+    module_def(&builder, &build_ops);
+
+    return NANONET_OK;
+  }
+
+  NANONET_FUNC void NanoNet_FreeModule(struct NanoNet_Module* m)
+  {
+    free(m);
+  }
+
+  NANONET_FUNC void NanoNet_RandomizeWeights(struct NanoNet_Module* m, uint32_t seed)
+  {
+    uint32_t x = seed;
+    for (uint32_t i = 0; i < m->num_params; i++) {
+      x = NanoNet_LCG(x);
+      const float y = ((float)x) / 2147483647.0F;
+      m->params[i] = y * 2.0F - 1.0F;
+    }
+  }
+
+  NANONET_FUNC uint32_t NanoNet_GetNumParams(const struct NanoNet_Module* m)
+  {
+    return m->num_params;
+  }
+
+  NANONET_FUNC float* NanoNet_GetParam(struct NanoNet_Module* m,
+                                       uint8_t param_index,
+                                       uint8_t* reg_index,
+                                       uint8_t* rows,
+                                       uint8_t* cols)
+  {
+    struct NanoNet_Reg* reg = &m->param_regs[param_index];
+
+    if (reg_index) {
+      *reg_index = m->param_reg_indices[param_index];
+    }
+
+    if (rows) {
+      *rows = reg->rows;
+    }
+
+    if (cols) {
+      *cols = reg->cols;
+    }
+
+    return &m->params[reg->offset];
+  }
+
+  NANONET_FUNC const uint32_t* NanoNet_GetModuleCode(const struct NanoNet_Module* m, uint32_t* num_opcodes)
+  {
+    if (num_opcodes != NULL) {
+      *num_opcodes = m->num_opcodes;
+    }
+
+    return m->opcodes;
+  }
+
+  NANONET_FUNC uint8_t NanoNet_GetOutputRegister(const struct NanoNet_Module* m)
+  {
+    return m->output_register;
+  }
+
+  NANONET_FUNC uint32_t NanoNet_LCG(uint32_t x)
+  {
+    x = (x == 0) ? 1 : x;
+    x *= 48271UL;
+    return x % 2147483647UL;
   }
 
 #ifdef __cplusplus
