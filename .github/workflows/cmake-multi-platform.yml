@@ -50,7 +50,7 @@ jobs:
     - name: Setup vcpkg
       uses: lukka/run-vcpkg@v10
       with:
-        vcpkgGitCommitId: "2024.11.16"
+        vcpkgGitCommitId: "b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c"
 
     - name: Set reusable strings
       # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
