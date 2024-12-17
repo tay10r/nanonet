@@ -52,6 +52,12 @@ jobs:
       with:
         vcpkgGitCommitId: "b2cb0da531c2f1f740045bfe7c4dac59f0b2b69c"
 
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+
     - name: Install dependencies
       run: |
         ./vcpkg/vcpkg install gtest eigen3
