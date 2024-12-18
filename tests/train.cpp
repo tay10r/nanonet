@@ -14,18 +14,19 @@ namespace {
 class training_loop
 {
 public:
-  virtual ~training_loop() { NanoNet_Free(vm_); }
+  virtual ~training_loop() { free(vm_); }
 
   void run(const int steps_per_epoch, const int num_training_epochs, const float learning_rate)
   {
-    NanoNet_Reset(vm_);
+    nn_reset(vm_);
+
     test_loss_.emplace_back(test());
 
     for (auto i = 0; i < num_training_epochs; i++) {
-      NanoNet_Reset(vm_);
+      nn_reset(vm_);
       train(learning_rate);
 
-      NanoNet_Reset(vm_);
+      nn_reset(vm_);
       test_loss_.emplace_back(test());
     }
   }
@@ -37,12 +38,12 @@ protected:
 
   virtual auto test() -> float = 0;
 
-  [[nodiscard]] auto vm() -> NanoNet_VM* { return vm_; }
+  [[nodiscard]] auto vm() -> nn_vm* { return vm_; }
 
   template<int Rows, int Cols>
   void set_reg(const uint8_t reg_index, const Eigen::Matrix<float, Rows, Cols>& m)
   {
-    NanoNet_SetRegData(vm_, reg_index, Rows, Cols, m.data());
+    nn_set_reg(vm_, reg_index, Rows, Cols, m.data());
   }
 
   [[nodiscard]] auto uniform_int(int min_v, int max_v) -> int
@@ -60,7 +61,7 @@ protected:
 private:
   std::mt19937 rng_{ 0 };
 
-  NanoNet_VM* vm_{ NanoNet_New() };
+  nn_vm* vm_{ nn_vm_new() };
 
   std::vector<float> test_loss_;
 };
@@ -80,7 +81,7 @@ protected:
   [[nodiscard]] auto test() -> float override
   {
     forward_pass();
-    const float loss = *NanoNet_GetRegData(vm(), 8);
+    const float loss = *nn_get_reg(vm(), 8);
     return loss;
   }
 
@@ -89,32 +90,32 @@ protected:
     forward_pass();
 
     // backward pass
-    EXPECT_EQ(NanoNet_Backward(vm(), loss_code_.data(), loss_code_.size()), NANONET_OK);
-    EXPECT_EQ(NanoNet_Backward(vm(), xor_code_.data(), xor_code_.size()), NANONET_OK);
+    EXPECT_EQ(nn_backward(vm(), loss_code_.data(), loss_code_.size()), NANONET_OK);
+    EXPECT_EQ(nn_backward(vm(), xor_code_.data(), xor_code_.size()), NANONET_OK);
 
     // update weights
-    NanoNet_GradientDescent(vm(), /*reg=*/0, learning_rate, weights_0_);
-    NanoNet_GradientDescent(vm(), /*reg=*/4, learning_rate, weights_1_);
+    nn_gradient_descent(vm(), /*reg=*/0, learning_rate, weights_0_);
+    nn_gradient_descent(vm(), /*reg=*/4, learning_rate, weights_1_);
   }
 
   void forward_pass()
   {
     //
-    ASSERT_EQ(NanoNet_SetRegData(vm(), /*reg_index=*/0, 2, 2, weights_0_), NANONET_OK);
-    ASSERT_EQ(NanoNet_SetRegData(vm(), /*reg_index=*/4, 1, 2, weights_1_), NANONET_OK);
+    ASSERT_EQ(nn_set_reg(vm(), /*reg_index=*/0, 2, 2, weights_0_), NANONET_OK);
+    ASSERT_EQ(nn_set_reg(vm(), /*reg_index=*/4, 1, 2, weights_1_), NANONET_OK);
 
     const int in[2]{ uniform_int(0, 1), uniform_int(0, 1) };
     const float real_in[2]{ static_cast<float>(in[0]), static_cast<float>(in[1]) };
-    ASSERT_EQ(NanoNet_SetRegData(vm(), /*reg_index=*/1, 2, 1, real_in), NANONET_OK);
+    ASSERT_EQ(nn_set_reg(vm(), /*reg_index=*/1, 2, 1, real_in), NANONET_OK);
 
-    EXPECT_EQ(NanoNet_Forward(vm(), xor_code_.data(), xor_code_.size()), NANONET_OK);
+    EXPECT_EQ(nn_forward(vm(), xor_code_.data(), xor_code_.size()), NANONET_OK);
 
     // forward pass (compute loss)
     const int expected{ in[0] ^ in[1] };
     const float expected_real{ static_cast<float>(expected) };
-    ASSERT_EQ(NanoNet_SetRegData(vm(), /*reg_index=*/7, 1, 1, real_in), NANONET_OK);
+    ASSERT_EQ(nn_set_reg(vm(), /*reg_index=*/7, 1, 1, real_in), NANONET_OK);
 
-    EXPECT_EQ(NanoNet_Forward(vm(), loss_code_.data(), loss_code_.size()), NANONET_OK);
+    EXPECT_EQ(nn_forward(vm(), loss_code_.data(), loss_code_.size()), NANONET_OK);
   }
 
 private:

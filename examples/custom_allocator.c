@@ -54,9 +54,9 @@ custom_free(void* ptr)
 int
 main()
 {
-  size_t s = NanoNet_VMSize();
-  struct NanoNet_VM* vm = custom_malloc(s);
-  memset(vm, 0, NanoNet_VMSize());
+  size_t s = nn_vm_size();
+  struct nn_vm* vm = custom_malloc(s);
+  memset(vm, 0, s);
   /* At this point, you can use the VM as you normally would. No need to call @ref NanoNet_New or @ref NanoNet_Free */
   custom_free(vm);
   return 0;

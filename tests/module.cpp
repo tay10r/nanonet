@@ -7,7 +7,7 @@
 namespace {
 
 auto
-print_module(const NanoNet_Module* m) -> std::string;
+print_module(const nn_module* m) -> std::string;
 
 } // namespace
 
@@ -22,11 +22,11 @@ NANONET_DEF_MODULE(empty_module)
 
 TEST(Module, EmptyModule)
 {
-  NanoNet_Module* mod{ nullptr };
-  const auto status = NanoNet_BuildModule(&mod, empty_module, nullptr, nullptr);
+  nn_module* mod{ nullptr };
+  const auto status = nn_build_module(&mod, empty_module, nullptr, nullptr);
   EXPECT_EQ(status, NANONET_OK);
   const auto str = print_module(mod);
-  NanoNet_FreeModule(mod);
+  free(mod);
   EXPECT_EQ(str, "");
 }
 
@@ -45,11 +45,11 @@ NANONET_DEF_MODULE(simple_module)
 
 TEST(Module, SimpleModule)
 {
-  NanoNet_Module* mod{ nullptr };
-  const auto status = NanoNet_BuildModule(&mod, simple_module, nullptr, nullptr);
+  nn_module* mod{ nullptr };
+  const auto status = nn_build_module(&mod, simple_module, nullptr, nullptr);
   EXPECT_EQ(status, NANONET_OK);
   const auto str = print_module(mod);
-  NanoNet_FreeModule(mod);
+  free(mod);
   EXPECT_EQ(str,
             "matmul %1 %0 -> %2\n"
             "add %3 %2 -> %4\n"
@@ -107,11 +107,11 @@ opcode_to_string(const uint32_t op) -> std::string
 }
 
 auto
-print_module(const NanoNet_Module* m) -> std::string
+print_module(const nn_module* m) -> std::string
 {
   std::ostringstream s;
   uint32_t num_opcodes{};
-  const auto* opcodes = NanoNet_GetModuleCode(m, &num_opcodes);
+  const auto* opcodes = nn_get_module_code(m, &num_opcodes);
   for (uint32_t i = 0; i < num_opcodes; i++) {
     s << opcode_to_string(opcodes[i]) << '\n';
   }

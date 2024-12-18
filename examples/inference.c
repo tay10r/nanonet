@@ -34,20 +34,20 @@ rand_float()
 int
 main()
 {
-  struct NanoNet_Module* m = NULL;
+  struct nn_module* m = NULL;
 
-  enum NanoNet_Status s = NanoNet_BuildModule(&m, example_module, /*error_callback_data=*/NULL, report_build_error);
+  enum nn_status s = nn_build_module(&m, example_module, /*error_callback_data=*/NULL, report_build_error);
   if (s != NANONET_OK) {
-    printf("failed to build module: %s\n", NanoNet_StatusString(s));
+    printf("failed to build module: %s\n", nn_status_string(s));
     return EXIT_FAILURE;
   }
 
-  NanoNet_RandomizeWeights(m, /*seed=*/0);
+  nn_randomize_params(m, /*seed=*/0);
 
-  struct NanoNet_VM* vm = NanoNet_New();
+  struct nn_vm* vm = nn_vm_new();
   if (!vm) {
     printf("failed to allocate VM.\n");
-    NanoNet_FreeModule(m);
+    free(m);
     return EXIT_FAILURE;
   }
 
@@ -58,43 +58,43 @@ main()
 
   uint32_t num_opcodes = 0;
 
-  uint8_t num_params = NanoNet_GetNumParams(m);
+  uint8_t num_params = nn_get_num_params(m);
 
   for (uint8_t i = 0; i < num_params; i++) {
     uint8_t reg = 0;
     uint8_t rows = 0;
     uint8_t cols = 0;
-    float* buffer = NanoNet_GetParam(m, i, &reg, &rows, &cols);
-    NanoNet_SetRegData(vm, reg, rows, cols, buffer);
+    float* buffer = nn_get_param(m, i, &reg, &rows, &cols);
+    nn_set_reg(vm, reg, rows, cols, buffer);
     printf("set parameter[%d] to register %d with shape (%d, %d)\n", (int)i, (int)reg, (int)rows, (int)cols);
   }
 
-  const uint32_t* opcodes = NanoNet_GetModuleCode(m, &num_opcodes);
+  const uint32_t* opcodes = nn_get_module_code(m, &num_opcodes);
 
   for (int i = 0; i < num_iterations; i++) {
 
-    NanoNet_Reset(vm);
+    nn_reset(vm);
 
     const float input[4] = { rand_float(), rand_float(), rand_float(), rand_float() };
 
-    NanoNet_SetRegData(vm, /*reg_index=*/0, 4, 1, input);
+    nn_set_reg(vm, /*reg_index=*/0, 4, 1, input);
 
-    s = NanoNet_Forward(vm, opcodes, num_opcodes);
+    s = nn_forward(vm, opcodes, num_opcodes);
     if (s != NANONET_OK) {
-      printf("failed to run forward pass: %s\n", NanoNet_StatusString(s));
+      printf("failed to run forward pass: %s\n", nn_status_string(s));
       break;
     }
 
-    const uint8_t out_reg = NanoNet_GetOutputRegister(m);
+    const uint8_t out_reg = nn_get_output_register(m);
 
-    const float* out = NanoNet_GetRegData(vm, out_reg);
+    const float* out = nn_get_reg(vm, out_reg);
 
     printf("result from register %d: %f\n", (int)out_reg, out[0]);
   }
 
-  NanoNet_Free(vm);
+  free(vm);
 
-  NanoNet_FreeModule(m);
+  free(m);
 
   return EXIT_SUCCESS;
 }

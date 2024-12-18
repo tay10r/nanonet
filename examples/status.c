@@ -7,19 +7,21 @@
 #include <NanoNet.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 int
 main()
 {
-  struct NanoNet_VM* vm = NanoNet_New();
+  struct nn_vm* vm = nn_vm_new();
 
   uint32_t bad_opcode = 0xffffffffU;
 
-  enum NanoNet_Status status = NanoNet_Forward(vm, &bad_opcode, 1);
+  enum nn_status status = nn_forward(vm, &bad_opcode, 1);
   if (status != NANONET_OK) {
-    printf("Failed to execute forward pass: %s\n", NanoNet_StatusString(status));
+    printf("Failed to execute forward pass: %s\n", nn_status_string(status));
   }
 
-  NanoNet_Free(vm);
+  free(vm);
+
   return 0;
 }
